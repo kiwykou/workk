@@ -100,3 +100,4 @@ C:\Users\Пользователь\source\repos\AvaloniaApplication19\AvaloniaApp
 C:\Users\Пользователь\source\repos\AvaloniaApplication19\AvaloniaApplication19\obj\Debug\net10.0\AvaloniaApplication19.genruntimeconfig.cache
 C:\Users\Пользователь\source\repos\AvaloniaApplication19\AvaloniaApplication19\obj\Debug\net10.0\ref\AvaloniaApplication19.dll
 C:\Users\Пользователь\source\repos\AvaloniaApplication19\AvaloniaApplication19\bin\Debug\net10.0\app.db
+C:\Users\Пользователь\source\repos\AvaloniaApplication19\AvaloniaApplication19\obj\Debug\net10.0\AvaloniaApplication19.sourcelink.json

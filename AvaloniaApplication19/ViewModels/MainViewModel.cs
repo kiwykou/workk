@@ -1,21 +1,25 @@
 ﻿using AvaloniaApplication19.Command;
+using AvaloniaApplication19.Data;
 using AvaloniaApplication19.Models;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Data;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Input;
 
 namespace AvaloniaApplication19.ViewModels
 {
     public class MainViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
     {
-        private const string ConnectionString = "Data Source=app.db";
+        
         private readonly Dictionary<string, List<string>> _errors = new();
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -24,18 +28,22 @@ namespace AvaloniaApplication19.ViewModels
         public ObservableCollection<Product> Products { get; } = new();
         public ICommand LoadProductsCommand { get; }
         public ICommand AddProductCommand { get; }
+        public ICommand UpdateProductCommand { get; }
+        public ICommand DeleteProductCommand { get; }
         public ICommand ClearInputCommand { get; }
-        public ICommand CheckLengthCommand { get; }
-        public ICommand CheckPriceCommand {  get; }
+
+
 
         public MainViewModel()
         {
             LoadProductsCommand = new RelayCommand(_ => LoadProducts());
             AddProductCommand = new RelayCommand(_ => AddProduct());
-            ClearInputCommand = new RelayCommand(_ => ClearInput());
-           
+            AddProductCommand = new RelayCommand(_ => UpdateProductAsync());
+            ClearInputCommand = new RelayCommand(_ => DeleteProductAsync());
+            ClearInputCommand = new RelayCommand(_ => ClearInputAsync());
 
-            LoadProducts();
+
+            InitializeAsync();
         }
         private string _name = "";
         public string Name
@@ -70,6 +78,25 @@ namespace AvaloniaApplication19.ViewModels
                 ValidatePrice();
             }
         }
+
+        private Product? _selectedProduct;
+        public Product? SelectedProduct
+        {
+            get => _selectedProduct;
+            set
+            {
+                _selectedProduct = value;
+                OnPropertyChanged();
+                
+                if (value != null)
+                {
+                    Name = value.Name;
+                    Category = value.Category;
+                    PriceText = value.Price.ToString();
+                }
+            }
+        }
+
         private string _info = "";
         public string Info
         {
@@ -79,6 +106,18 @@ namespace AvaloniaApplication19.ViewModels
                 _info = value;
                 OnPropertyChanged();
 
+            }
+        }
+
+        private bool _isLoading;
+        public bool IsLoading
+        {
+            get => _isLoading;
+            set
+            {
+                _isLoading = value;
+                OnPropertyChanged();
+              
             }
         }
         private string _description= "";
@@ -106,39 +145,54 @@ namespace AvaloniaApplication19.ViewModels
             }
             return Array.Empty<string>();
         }
-        private void LoadProducts()
+        private async Task InitializeAsync()
         {
-            Products.Clear();
-            using var connection = new SqliteConnection(ConnectionString);
-            connection.Open();
-
-            var command = connection.CreateCommand();
-
-            command.CommandText =
-                """
-                SELECT Id, Name, Category, Price
-                FROM Products
-                ORDER BY Id;
-                """;
-
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                Products.Add(new Product
-                {
-                    Id = reader.GetInt32(0),
-                    Name = reader.GetString(1),
-                    Category = reader.GetString(2),
-                    Price = reader.GetDouble(3)
-                  
-                });
-
-            }
-            Info = $"Загружено товаров {Products.Count}";
+            await CreateDatabaseAsync();
+            await LoadProductsAsync();
         }
-        private void AddProduct()
+        private async Task CreateDatabaseAsync()
+        {
+            using var db = new AppDbContext();
+            await db.Database.EnsureCreatedAsync();
+            bool hasProduct = await db.Products.AnyAsync();
+            if (!hasProduct)
+            {
+                db.Products.AddRange(
+                    new Product { Name = "ноутбук", Category = "Компьютеры и ноутбуки", Price = 85000 },
+                    new Product { Name = "ноутбук", Category = "Компьютеры и ноутбуки", Price = 85000 },
+                    new Product { Name = "ноутбук", Category = "Компьютеры и ноутбуки", Price = 85000 }
+                    );
+                await db.SaveChangesAsync();
+            }
+        }
+        private async Task LoadProductsAsync()
+        {
+            IsLoading = true;
+            Info = "загрузка...";
+
+            Products.Clear();
+            await Task.Delay(500);
+            using var db = new AppDbContext();
+
+
+            var products = await db.Products
+                .AsNoTracking()
+                .OrderBy(p => p.Id)
+                .ToListAsync();
+            foreach (var product in products)
+            {
+                Products.Add(product);
+            }
+            Info = $"Загружено: {Products.Count}";
+            IsLoading = false;
+        }
+        
+            
+      
+        private async Task AddProduct()
         {
             ValidateAll();
+
             if (HasErrors)
             {
                 Info = "Исправьте ошибки перед добавлением";
@@ -146,31 +200,95 @@ namespace AvaloniaApplication19.ViewModels
             }
             double price = double.Parse(PriceText);
 
-            using var connection = new SqliteConnection(ConnectionString);
-            connection.Open();
+            IsLoading = true;
+            Info = ""
 
-            var command = connection.CreateCommand();
+            using var db = new AppDbContext();
+            var product = new Product
+            {
+                Name = Name,
+                Category = Category,
+                Price = price
+            };
+            db.Products.Add(product);
+            await db.SaveChangesAsync();
 
-            command.CommandText =
-                """
-                INSERT  INTO Products (Name, Category, Price, Description)
-                VALUES ($name, $category, $price, $description);
-                """;
-
-            command.Parameters.AddWithValue("$name", Name);
-            command.Parameters.AddWithValue("$category", Category);
-            command.Parameters.AddWithValue("$price", price);
-            command.Parameters.AddWithValue("$description", Description);
-
-            command.ExecuteNonQuery();
+            await ClearInputAsync();
+            await LoadProductsAsync();
 
             Info = "Товар добавлен";
+            IsLoading = false;
 
-            ClearInput();
-            LoadProducts();
+            
 
         }
+        private async Task UpdateProductAsync()
+        {
+            if(SelectedProduct == null)
+            {
+                Info = "Исправьте ошибкии перед добавлением";
+                return;
+            }
+            ValidateAll();
 
+            if (HasErrors)
+            {
+                Info = "Исправьте ошибкии перед добавлением";
+                return;
+            }
+            double price = double.Parse (PriceText);
+
+            IsLoading = true;
+            Info = "Обновление";
+
+            using var db = new AppDbContext();
+            var product = await db.Products.FirstOrDefaultAsync(p => p.Id == SelectedProduct.Id);
+            if (product == null)
+            {
+                Info = "Товар не найден";
+                IsLoading = false;
+                return;
+            }
+            product.Name = Name;
+            product.Category = Category;
+            product.Price = price;
+            await db.SaveChangesAsync();
+
+            await ClearInputAsync();
+            await LoadProductsAsync();
+
+            Info = "Товар обновлён";
+            IsLoading = false;
+        }
+         
+        private async Task DeleteProductAsync()
+        {
+            if (SelectedProduct == null)
+            {
+                Info = "Выберите товар для удаления";
+                return;
+            }
+            
+
+            
+
+            IsLoading = true;
+            Info = "Удаление";
+
+            using var db = new AppDbContext();
+            var product = await db.Products.FirstOrDefaultAsync(p => p.Id == SelectedProduct.Id);
+            if (product == null)
+            {
+                Info = "Товар не найден";
+                IsLoading = false;
+                return;
+            }
+            db.Products.Remove(product);
+            await db.SaveChangesAsync();
+
+            Info = "Товар обновлён";
+            IsLoading = false;
+        }
         private void ClearInput()
         {
             Name = "";
